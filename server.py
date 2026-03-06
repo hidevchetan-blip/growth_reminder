@@ -58,7 +58,7 @@ async def landing_page():
                 <div class="features">
                     <h3>✨ Features:</h3>
                     <ul>
-                        <li>Daily motivational quotes</li>
+                        <li>Daily motivational quotes :)</li>
                         <li>Beautiful desktop notifications</li>
                         <li>Sound alerts</li>
                         <li>Automatic scheduling (cron/Task Scheduler)</li>
@@ -240,25 +240,30 @@ def verify_signature(payload, signature):
 @app.post("/webhook")
 async def webhook(request: Request):
 
-    payload = await request.body()
     signature = request.headers.get("X-Hub-Signature-256")
+
+    if not signature:
+        raise HTTPException(status_code=403)
+
+    payload = await request.body()
 
     if not verify_signature(payload, signature):
         raise HTTPException(status_code=403)
 
     event = request.headers.get("X-GitHub-Event")
+
     if event != "push":
         return {"status": "ignored"}
 
     data = await request.json()
 
     if data["ref"] == "refs/heads/main":
-        subprocess.run(["git", "fetch", "origin"])
-        subprocess.run(["git", "reset", "--hard", "origin/main"])
 
-        return {"status": "updated"}
+        subprocess.run(["git", "pull", "origin", "main"])
+        return {"status": "deployed"}
 
     return {"status": "ignored"}
+
 
 @app.get("/health")
 async def health_check():
