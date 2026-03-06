@@ -240,32 +240,25 @@ def verify_signature(payload, signature):
 @app.post("/webhook")
 async def webhook(request: Request):
 
-    signature = request.headers.get("X-Hub-Signature-256")
-
-    if not signature:
-        raise HTTPException(status_code=403)
-
     payload = await request.body()
+    signature = request.headers.get("X-Hub-Signature-256")
 
     if not verify_signature(payload, signature):
         raise HTTPException(status_code=403)
 
     event = request.headers.get("X-GitHub-Event")
-
     if event != "push":
         return {"status": "ignored"}
 
     data = await request.json()
 
     if data["ref"] == "refs/heads/main":
+        subprocess.run(["git", "fetch", "origin"])
+        subprocess.run(["git", "reset", "--hard", "origin/main"])
 
-        subprocess.run(["git", "pull", "origin", "main"])
-        subprocess.run(["bash", "installers/install_linux.sh"])
-
-        return {"status": "deployed"}
+        return {"status": "updated"}
 
     return {"status": "ignored"}
-
 
 @app.get("/health")
 async def health_check():
