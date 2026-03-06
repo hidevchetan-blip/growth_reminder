@@ -1,16 +1,18 @@
 # server.py - Your central server
 from fastapi import FastAPI, Request, HTTPException, Response
-
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import os
 import uuid
-import platform
 from datetime import datetime
-from typing import Optional
 import uvicorn
+import hmac
+import hashlib
+import subprocess
 
 app = FastAPI(title="Growth Reminder Installer")
+
+SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "secret@321")
 
 # In-memory storage (use database in production)
 users_db = {}
@@ -20,6 +22,7 @@ os.makedirs("installers", exist_ok=True)
 os.makedirs("scripts", exist_ok=True)
 os.makedirs("templates", exist_ok=True)
 os.makedirs("logs", exist_ok=True)
+
 
 @app.get("/", response_class=HTMLResponse)
 async def landing_page():
@@ -76,17 +79,16 @@ async def landing_page():
         </html>
         """)
 
+
 @app.get("/install/{os_type}")
 async def download_installer(os_type: str, request: Request):
     """Serve the appropriate installer based on OS"""
-    
-    # Generate unique user ID for tracking
+
     user_id = str(uuid.uuid4())
-    
-    # Log the download
+
     client_ip = request.client.host
     user_agent = request.headers.get("user-agent", "Unknown")
-    
+
     users_db[user_id] = {
         "ip": client_ip,
         "user_agent": user_agent,
@@ -94,16 +96,17 @@ async def download_installer(os_type: str, request: Request):
         "downloaded_at": datetime.now().isoformat(),
         "installed": False
     }
-    
-    # Log to file
+
     with open("logs/downloads.log", "a") as f:
         f.write(f"{datetime.now()},{user_id},{client_ip},{os_type},{user_agent}\n")
-    
+
     if os_type.lower() == "windows":
+
         installer_path = "./installers/install_windows.bat"
+
         if not os.path.exists(installer_path):
             raise HTTPException(status_code=404, detail="Installer not found")
-        
+
         return FileResponse(
             path=installer_path,
             filename=f"growth_reminder_install_{user_id[:8]}.bat",
@@ -112,12 +115,14 @@ async def download_installer(os_type: str, request: Request):
                 "Content-Disposition": f"attachment; filename=growth_reminder_install_{user_id[:8]}.bat"
             }
         )
-    
+
     elif os_type.lower() == "linux":
+
         installer_path = "./installers/install_linux.sh"
+
         if not os.path.exists(installer_path):
             raise HTTPException(status_code=404, detail="Installer not found")
-        
+
         return FileResponse(
             path=installer_path,
             filename=f"growth_reminder_install_{user_id[:8]}.sh",
@@ -126,32 +131,29 @@ async def download_installer(os_type: str, request: Request):
                 "Content-Disposition": f"attachment; filename=growth_reminder_install_{user_id[:8]}.sh"
             }
         )
-    
+
     else:
         raise HTTPException(status_code=400, detail="Unsupported OS. Please choose Windows or Linux.")
 
+
 @app.get("/script.py")
 async def download_python_script(request: Request):
-    """Serve the Python script with optional user ID injection"""
-    
+
     script_path = "./scripts/growth_reminder.py"
+
     if not os.path.exists(script_path):
         raise HTTPException(status_code=404, detail="Script not found")
-    
-    # Read the script
+
     with open(script_path, "r", encoding="utf-8") as f:
         script_content = f.read()
-    
-    # Optional: Inject server URL for reporting
-    # Get the base URL from request
+
     base_url = str(request.base_url).rstrip('/')
-    
-    # Replace placeholder with actual server URL
+
     script_content = script_content.replace(
         "YOUR_SERVER_URL_PLACEHOLDER",
         base_url
     )
-    
+
     return Response(
         content=script_content,
         media_type="text/plain",
@@ -160,28 +162,30 @@ async def download_python_script(request: Request):
         }
     )
 
+
 @app.post("/api/ping")
 async def receive_ping(data: dict):
-    """Receive execution reports from installed scripts"""
+
     user_id = data.get("user_id")
     status = data.get("status", "unknown")
-    
+
     if user_id and user_id in users_db:
+
         users_db[user_id]["last_seen"] = datetime.now().isoformat()
         users_db[user_id]["status"] = status
         users_db[user_id]["installed"] = True
-        
-        # Log to file
+
         with open("logs/pings.log", "a") as f:
             f.write(f"{datetime.now()},{user_id},{status}\n")
-        
+
         return JSONResponse({"status": "received", "user_id": user_id})
-    
+
     return JSONResponse({"status": "error", "message": "User not found"}, status_code=404)
+
 
 @app.get("/api/quote")
 async def get_fallback_quote():
-    """Provide fallback quotes if main API fails"""
+
     quotes = [
         "The only way to do great work is to love what you do. — Steve Jobs",
         "Success is not final, failure is not fatal: it is the courage to continue that counts. — Winston Churchill",
@@ -192,22 +196,28 @@ async def get_fallback_quote():
         "It does not matter how slowly you go as long as you do not stop. — Confucius",
         "Everything you've ever wanted is on the other side of fear. — George Addair"
     ]
+
     import random
+
     return JSONResponse({"quote": random.choice(quotes)})
+
 
 @app.get("/api/stats")
 async def get_stats():
-    """Get installation statistics"""
+
     total_downloads = len(users_db)
+
     installed = sum(1 for u in users_db.values() if u.get("installed"))
-    active_today = sum(1 for u in users_db.values() 
-                      if u.get("last_seen") and 
-                      (datetime.now() - datetime.fromisoformat(u["last_seen"])).days < 1)
-    
-    # OS breakdown
+
+    active_today = sum(
+        1 for u in users_db.values()
+        if u.get("last_seen") and
+        (datetime.now() - datetime.fromisoformat(u["last_seen"])).days < 1
+    )
+
     windows_count = sum(1 for u in users_db.values() if u.get("os") == "windows")
     linux_count = sum(1 for u in users_db.values() if u.get("os") == "linux")
-    
+
     return {
         "total_downloads": total_downloads,
         "successful_installs": installed,
@@ -218,9 +228,54 @@ async def get_stats():
         }
     }
 
+
+def verify_signature(payload, signature):
+
+    mac = hmac.new(SECRET.encode(), payload, hashlib.sha256)
+    expected = "sha256=" + mac.hexdigest()
+
+    return hmac.compare_digest(expected, signature)
+
+
+@app.post("/webhook")
+async def webhook(request: Request):
+
+    signature = request.headers.get("X-Hub-Signature-256")
+
+    if not signature:
+        raise HTTPException(status_code=403)
+
+    payload = await request.body()
+
+    if not verify_signature(payload, signature):
+        raise HTTPException(status_code=403)
+
+    event = request.headers.get("X-GitHub-Event")
+
+    if event != "push":
+        return {"status": "ignored"}
+
+    data = await request.json()
+
+    if data["ref"] == "refs/heads/main":
+
+        subprocess.run(["git", "pull", "origin", "main"])
+        subprocess.run(["bash", "installers/install_linux.sh"])
+
+        return {"status": "deployed"}
+
+    return {"status": "ignored"}
+
+
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat()
+    }
+
 
 if __name__ == "__main__":
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
