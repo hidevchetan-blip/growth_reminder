@@ -58,7 +58,7 @@ async def landing_page():
                 <div class="features">
                     <h3>✨ Features:</h3>
                     <ul>
-                        <li>Daily motivational quotes :)</li>
+                        <li>Daily motivational quotes check</li>
                         <li>Beautiful desktop notifications</li>
                         <li>Sound alerts</li>
                         <li>Automatic scheduling (cron/Task Scheduler)</li>
