@@ -69,6 +69,7 @@ async def landing_page():
                     <ol>
                         <li>Click download button for your OS</li>
                         <li>Run the downloaded installer</li>
+                        <li>That's it! You'll get your first reminder tomorrow at 9 AM</li>
                     </ol>
                     
                     <p><small>⚡ Test it now: After installation, run the script manually to see a sample notification</small></p>
